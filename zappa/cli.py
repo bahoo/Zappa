@@ -115,6 +115,7 @@ class ZappaCLI:
     vpc_config = None
     memory_size = None
     use_apigateway = None
+    apigateway_protocol = None
     lambda_handler = None
     django_settings = None
     manage_roles = True
@@ -895,7 +896,7 @@ class ZappaCLI:
             self.lambda_arn = self.zappa.get_lambda_function(
                 function_name=self.lambda_name
             )
-        except botocore.client.ClientError:
+        except botocore.exceptions.ClientError:
             # Register the Lambda function with that zip as the source
             # You'll also need to define the path to your lambda_handler code.
             kwargs = dict(
@@ -958,6 +959,7 @@ class ZappaCLI:
                 cors_options=self.cors,
                 description=self.apigateway_description,
                 endpoint_configuration=self.endpoint_configuration,
+                apigateway_protocol=self.apigateway_protocol
             )
 
             self.zappa.update_stack(
@@ -969,21 +971,30 @@ class ZappaCLI:
 
             api_id = self.zappa.get_api_id(self.lambda_name)
 
-            # Add binary support
-            if self.binary_support:
-                self.zappa.add_binary_support(api_id=api_id, cors=self.cors)
+            if self.apigateway_protocol == "REST":
 
-            # Add payload compression
-            if self.stage_config.get("payload_compression", True):
-                self.zappa.add_api_compression(
-                    api_id=api_id,
-                    min_compression_size=self.stage_config.get(
-                        "payload_minimum_compression_size", 0
-                    ),
-                )
+                # Add binary support
+                if self.binary_support:
+                    self.zappa.add_binary_support(api_id=api_id, cors=self.cors)
+
+                # Add payload compression
+                if self.stage_config.get("payload_compression", True):
+                    self.zappa.add_api_compression(
+                        api_id=api_id,
+                        min_compression_size=self.stage_config.get(
+                            "payload_minimum_compression_size", 0
+                        ),
+                    )
 
             # Deploy the API!
-            endpoint_url = self.deploy_api_gateway(api_id)
+            if self.apigateway_protocol == "REST":
+                endpoint_url = self.deploy_api_gateway(api_id)
+            else:
+                # todo: apogee
+                # is there any scenario where more stages would be interesting / helpful
+                # in HTTP world ? IDK
+                # return URL for now.
+                endpoint_url = self.get_api_gateway_url(api_id)
             deployment_string = deployment_string + ": {}".format(endpoint_url)
 
             # Create/link API key
@@ -1181,6 +1192,8 @@ class ZappaCLI:
             if self.stage_config.get("delete_local_zip", True):
                 self.remove_local_zip()
 
+        print("Protocol: %s" % self.apigateway_protocol)
+
         if self.use_apigateway:
 
             self.zappa.create_stack_template(
@@ -1192,6 +1205,7 @@ class ZappaCLI:
                 cors_options=self.cors,
                 description=self.apigateway_description,
                 endpoint_configuration=self.endpoint_configuration,
+                apigateway_protocol=self.apigateway_protocol
             )
             self.zappa.update_stack(
                 self.lambda_name,
@@ -1203,25 +1217,33 @@ class ZappaCLI:
 
             api_id = self.zappa.get_api_id(self.lambda_name)
 
-            # Update binary support
-            if self.binary_support:
-                self.zappa.add_binary_support(api_id=api_id, cors=self.cors)
-            else:
-                self.zappa.remove_binary_support(api_id=api_id, cors=self.cors)
+            if self.apigateway_protocol == "REST":
 
-            if self.stage_config.get("payload_compression", True):
-                self.zappa.add_api_compression(
-                    api_id=api_id,
-                    min_compression_size=self.stage_config.get(
-                        "payload_minimum_compression_size", 0
-                    ),
-                )
-            else:
-                self.zappa.remove_api_compression(api_id=api_id)
+                # Update binary support
+                if self.binary_support:
+                    self.zappa.add_binary_support(api_id=api_id, cors=self.cors)
+                else:
+                    self.zappa.remove_binary_support(api_id=api_id, cors=self.cors)
+
+                # Update payload compression
+                if self.stage_config.get("payload_compression", True):
+                    self.zappa.add_api_compression(
+                        api_id=api_id,
+                        min_compression_size=self.stage_config.get(
+                            "payload_minimum_compression_size", 0
+                        ),
+                    )
+                else:
+                    self.zappa.remove_api_compression(api_id=api_id)
 
             # It looks a bit like we might actually be using this just to get the URL,
             # but we're also updating a few of the APIGW settings.
-            endpoint_url = self.deploy_api_gateway(api_id)
+            # endpoint_url = self.deploy_api_gateway(api_id)
+
+            if self.apigateway_protocol == "REST":
+                endpoint_url = self.deploy_api_gateway(api_id)
+            else:
+                endpoint_url = self.get_api_gateway_url(api_id)
 
             if self.stage_config.get("domain", None):
                 endpoint_url = self.stage_config.get("domain")
@@ -1230,6 +1252,26 @@ class ZappaCLI:
             endpoint_url = None
 
         self.schedule()
+
+        # todo: apogee
+        # re-add permissions on update
+        # I don't understand why this must be explicit and not inherited from
+        # the stack, but w/e
+        # also: need to call this after schedule since it wipes permissions.
+        permission_response = self.zappa.lambda_client.add_permission(
+                FunctionName=self.lambda_name,
+                StatementId="".join(
+                    random.choice(string.ascii_uppercase + string.digits) for _ in range(8)
+                ),
+                Action="lambda:InvokeFunction",
+                Principal="apigateway.amazonaws.com",
+                SourceArn="arn:aws:execute-api:%(region)s:%(account_id)s:%(api)s/*/*" % {
+                    "region": self.zappa.aws_region,
+                    "account_id": self.lambda_arn.split(':')[4],
+                    "api": api_id
+            })
+
+        print(permission_response)
 
         # Update any cognito pool with the lambda arn
         # do this after schedule as schedule clears the lambda policy and we need to add one
@@ -2565,6 +2607,11 @@ class ZappaCLI:
         self.use_apigateway = self.stage_config.get("use_apigateway", True)
         if self.use_apigateway:
             self.use_apigateway = self.stage_config.get("apigateway_enabled", True)
+
+        # Default to REST for legacy support
+        # ( but default to HTTP on newer init'ed projects )
+        self.apigateway_protocol = self.stage_config.get("apigateway_protocol", "REST")
+
         self.apigateway_description = self.stage_config.get(
             "apigateway_description", None
         )
@@ -3284,6 +3331,11 @@ class ZappaCLI:
             ),
         )
         return endpoint_url
+
+    def get_api_gateway_url(self, api_id):
+        return "https://{}.execute-api.{}.amazonaws.com/".format(
+                api_id, self.zappa.aws_region
+            )
 
     def check_venv(self):
         """Ensure we're inside a virtualenv."""

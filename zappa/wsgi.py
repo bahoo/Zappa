@@ -25,7 +25,7 @@ def create_wsgi_request(
     Given some event_info via API Gateway,
     create and return a valid WSGI request environ.
     """
-    method = event_info["httpMethod"]
+    method = event_info["requestContext"]["http"]["method"]
     headers = (
         merge_headers(event_info) or {}
     )  # Allow for the AGW console 'Test' button to work (Pull #735)
@@ -75,15 +75,15 @@ def create_wsgi_request(
     #           https://en.wikipedia.org/wiki/Hypertext_Transfer_Protocol#Summary_table
     if binary_support and (method in BINARY_METHODS):
         if event_info.get("isBase64Encoded", False):
-            encoded_body = event_info["body"]
+            encoded_body = event_info.get("body", "")
             body = base64.b64decode(encoded_body)
         else:
-            body = event_info["body"]
+            body = event_info.get("body", "")
             if isinstance(body, six.string_types):
                 body = body.encode("utf-8")
 
     else:
-        body = event_info["body"]
+        body = event_info.get("body", "")
         if isinstance(body, six.string_types):
             body = body.encode("utf-8")
 
@@ -91,12 +91,20 @@ def create_wsgi_request(
     # https://github.com/Miserlou/Zappa/issues/1188
     headers = titlecase_keys(headers)
 
-    path = urls.url_unquote(event_info["path"])
+    path = urls.url_unquote(event_info["requestContext"].get("path", event_info["requestContext"]["http"]["path"]))
+
+    # this might be optional ?
+
     if base_path:
         script_name = "/" + base_path
 
         if path.startswith(script_name):
             path = path[len(script_name) :]
+
+    print("eyyyy")
+    print(path)
+    print(script_name)
+    print("-----")
 
     x_forwarded_for = headers.get("X-Forwarded-For", "")
     if "," in x_forwarded_for:

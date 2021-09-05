@@ -366,6 +366,7 @@ class LambdaHandler:
         that back to the API Gateway.
 
         """
+
         settings = self.settings
 
         # If in DEBUG mode, log all raw incoming events.
@@ -507,8 +508,130 @@ class LambdaHandler:
             # Timing
             time_start = datetime.datetime.now()
 
+            # 1.0 format request:
+            # {
+            #   "version": "1.0",
+            #   "resource": "/my/path",
+            #   "path": "/my/path",
+            #   "httpMethod": "GET",
+            #   "headers": {
+            #     "header1": "value1",
+            #     "header2": "value2"
+            #   },
+            #   "multiValueHeaders": {
+            #     "header1": [
+            #       "value1"
+            #     ],
+            #     "header2": [
+            #       "value1",
+            #       "value2"
+            #     ]
+            #   },
+            #   "queryStringParameters": {
+            #     "parameter1": "value1",
+            #     "parameter2": "value"
+            #   },
+            #   "multiValueQueryStringParameters": {
+            #     "parameter1": [
+            #       "value1",
+            #       "value2"
+            #     ],
+            #     "parameter2": [
+            #       "value"
+            #     ]
+            #   },
+            #   "requestContext": {
+            #     "accountId": "123456789012",
+            #     "apiId": "id",
+            #     "authorizer": {
+            #       "claims": null,
+            #       "scopes": null
+            #     },
+            #     "domainName": "id.execute-api.us-east-1.amazonaws.com",
+            #     "domainPrefix": "id",
+            #     "extendedRequestId": "request-id",
+            #     "httpMethod": "GET",
+            #     "identity": {
+            #       "accessKey": null,
+            #       "accountId": null,
+            #       "caller": null,
+            #       "cognitoAuthenticationProvider": null,
+            #       "cognitoAuthenticationType": null,
+            #       "cognitoIdentityId": null,
+            #       "cognitoIdentityPoolId": null,
+            #       "principalOrgId": null,
+            #       "sourceIp": "IP",
+            #       "user": null,
+            #       "userAgent": "user-agent",
+            #       "userArn": null,
+            #       "clientCert": {
+            #         "clientCertPem": "CERT_CONTENT",
+            #         "subjectDN": "www.example.com",
+            #         "issuerDN": "Example issuer",
+            #         "serialNumber": "a1:a1:a1:a1:a1:a1:a1:a1:a1:a1:a1:a1:a1:a1:a1:a1",
+            #         "validity": {
+            #           "notBefore": "May 28 12:30:02 2019 GMT",
+            #           "notAfter": "Aug  5 09:36:04 2021 GMT"
+            #         }
+            #       }
+            #     },
+            #     "path": "/my/path",
+            #     "protocol": "HTTP/1.1",
+            #     "requestId": "id=",
+            #     "requestTime": "04/Mar/2020:19:15:17 +0000",
+            #     "requestTimeEpoch": 1583349317135,
+            #     "resourceId": null,
+            #     "resourcePath": "/my/path",
+            #     "stage": "$default"
+            #   },
+            #   "pathParameters": null,
+            #   "stageVariables": null,
+            #   "body": "Hello from Lambda!",
+            #   "isBase64Encoded": false
+            # }
+
+            # 2.0 format request:
+            # {
+            #  'version': '2.0',
+            #  'routeKey': '$default',
+            #  'rawPath': '/',
+            #  'rawQueryString': '',
+            #  'headers': {
+            #     'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            #     'accept-encoding': 'gzip, deflate, br',
+            #     'accept-language': 'en-us',
+            #     'content-length': '0',
+            #     'host': 'b4runpcpqd.execute-api.us-west-2.amazonaws.com',
+            #     'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2 Safari/605.1.15',
+            #     'x-amzn-trace-id': 'Root=1-612ef070-5689a9677d1cc9092c7d4a46',
+            #     'x-forwarded-for': '50.47.143.241',
+            #     'x-forwarded-port': '443',
+            #     'x-forwarded-proto': 'https'
+            # },
+            #  'requestContext': {
+            #     'accountId': '954590915864',
+            #     'apiId': 'b4runpcpqd',
+            #     'domainName': 'b4runpcpqd.execute-api.us-west-2.amazonaws.com',
+            #     'domainPrefix': 'b4runpcpqd',
+            #     'http': {
+            #         'method': 'GET',
+            #         'path': '/',
+            #         'protocol': 'HTTP/1.1',
+            #         'sourceIp': '50.47.143.241',
+            #         'userAgent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2 Safari/605.1.15'
+            #     },
+            #     'requestId': 'E9qBkiW9vHcESlA=',
+            #     'routeKey': '$default',
+            #     'stage': '$default',
+            #     'time': '01/Sep/2021:03:16:00 +0000',
+            #     'timeEpoch': 1630466160267},
+            # 'isBase64Encoded': False
+            # }
+
+
+
             # This is a normal HTTP request
-            if event.get("httpMethod", None):
+            if event.get("requestContext", {}).get("http", {}).get("method", None):
                 script_name = ""
                 is_elb_context = False
                 headers = merge_headers(event)
@@ -530,6 +653,9 @@ class LambdaHandler:
                     else:
                         host = None
                     logger.debug("host found: [{}]".format(host))
+
+                    # todo: apogee
+                    # this may need more intelligent handling for API Gateway v2
 
                     if host:
                         if "amazonaws.com" in host:
@@ -570,6 +696,7 @@ class LambdaHandler:
 
                 # Execute the application
                 with Response.from_app(self.wsgi_app, environ) as response:
+
                     # This is the object we're going to return.
                     # Pack the WSGI response into our special dictionary.
                     zappa_returndict = dict()
@@ -616,6 +743,8 @@ class LambdaHandler:
                     common_log(environ, response, response_time=response_time_ms)
 
                     return zappa_returndict
+            else:
+                return str(event)
         except Exception as e:  # pragma: no cover
             # Print statements are visible in the logs either way
             print(e)
