@@ -160,7 +160,8 @@ class LambdaHandler:
                 wsgi_app_function = get_django_wsgi(self.settings.DJANGO_SETTINGS)
                 self.trailing_slash = True
 
-            self.wsgi_app = ZappaWSGIMiddleware(wsgi_app_function)
+            # self.wsgi_app = ZappaWSGIMiddleware(wsgi_app_function)
+            self.wsgi_app = wsgi_app_function
 
     def load_remote_project_archive(self, project_zip_path):
         """
@@ -655,26 +656,28 @@ class LambdaHandler:
                     logger.debug("host found: [{}]".format(host))
 
                     # todo: apogee
-                    # this may need more intelligent handling for API Gateway v2
+                    # might need better handling if
+                    # you define non-$default stages in 2.0
+                    if event.get("version", "1.0") == "1.0":
 
-                    if host:
-                        if "amazonaws.com" in host:
-                            logger.debug("amazonaws found in host")
-                            # The path provided in th event doesn't include the
-                            # stage, so we must tell Flask to include the API
-                            # stage in the url it calculates. See https://github.com/Miserlou/Zappa/issues/1014
-                            script_name = "/" + settings.API_STAGE
-                    else:
-                        # This is a test request sent from the AWS console
-                        if settings.DOMAIN:
-                            # Assume the requests received will be on the specified
-                            # domain. No special handling is required
-                            pass
+                        if host:
+                            if "amazonaws.com" in host:
+                                logger.debug("amazonaws found in host")
+                                # The path provided in th event doesn't include the
+                                # stage, so we must tell Flask to include the API
+                                # stage in the url it calculates. See https://github.com/Miserlou/Zappa/issues/1014
+                                script_name = "/" + settings.API_STAGE
                         else:
-                            # Assume the requests received will be to the
-                            # amazonaws.com endpoint, so tell Flask to include the
-                            # API stage
-                            script_name = "/" + settings.API_STAGE
+                            # This is a test request sent from the AWS console
+                            if settings.DOMAIN:
+                                # Assume the requests received will be on the specified
+                                # domain. No special handling is required
+                                pass
+                            else:
+                                # Assume the requests received will be to the
+                                # amazonaws.com endpoint, so tell Flask to include the
+                                # API stage
+                                script_name = "/" + settings.API_STAGE
 
                 base_path = getattr(settings, "BASE_PATH", None)
 
@@ -733,6 +736,10 @@ class LambdaHandler:
                             zappa_returndict["multiValueHeaders"][
                                 key
                             ] = response.headers.getlist(key)
+
+                    # todo: set cookie
+                    if event.get("version", "1.0") == "1.0":
+                        pass
 
                     # Calculate the total response time,
                     # and log it in the Common Log format.

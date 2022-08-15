@@ -101,11 +101,6 @@ def create_wsgi_request(
         if path.startswith(script_name):
             path = path[len(script_name) :]
 
-    print("eyyyy")
-    print(path)
-    print(script_name)
-    print("-----")
-
     x_forwarded_for = headers.get("X-Forwarded-For", "")
     if "," in x_forwarded_for:
         # The last one is the cloudfront proxy ip. The second to last is the real client ip.
@@ -160,6 +155,11 @@ def create_wsgi_request(
 
     if event_info["requestContext"].get("authorizer"):
         environ["API_GATEWAY_AUTHORIZER"] = event_info["requestContext"]["authorizer"]
+
+    # todo: apogee
+    # format cookies
+    if event_info.get("cookies", []):
+        environ["HTTP_COOKIE"] = ";".join(event_info.get("cookies", []))
 
     return environ
 
